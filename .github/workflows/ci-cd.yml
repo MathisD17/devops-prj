@@ -1,0 +1,192 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [ "master" ]
+  pull_request:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  test-backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: projet_devops_backend
+
+    services:
+      mysql:
+        image: mysql:8
+        ports:
+          - 3306:3306
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: todolist_db
+        options: >-
+          --health-cmd="mysqladmin ping --silent"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=3
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 18
+      - run: npm install
+      - run: chmod +x ./node_modules/.bin/jest
+      - run: npm test
+
+  build-and-push-backend:
+    runs-on: ubuntu-latest
+    needs: test-backend
+    if: success()
+    defaults:
+      run:
+        working-directory: projet_devops_backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: projet_devops_backend
+          file: projet_devops_backend/Dockerfile
+          push: true
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/todolist-backend:latest
+
+  test-frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: projet_devops_frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 16
+      - run: npm install
+      - run: npm install -g @angular/cli@15
+      - run: ng test --watch=false --browsers=ChromeHeadless
+
+  build-and-push-frontend:
+    runs-on: ubuntu-latest
+    needs: test-frontend
+    if: success()
+    defaults:
+      run:
+        working-directory: projet_devops_frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: projet_devops_frontend
+          file: projet_devops_frontend/Dockerfile
+          push: true
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/todolist-frontend:latest
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: [build-and-push-backend, build-and-push-frontend]
+    if: success()
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Télécharger kubectl
+        run: |
+          curl -LO https://dl.k8s.io/release/v1.28.3/bin/linux/amd64/kubectl
+          chmod +x ./kubectl
+          sudo mv ./kubectl /usr/local/bin/kubectl
+
+      - name: Configure kubeconfig
+        run: |
+          mkdir -p iac
+          cat <<EOF > iac/kubeconfig.yaml
+          apiVersion: v1
+          kind: Config
+          clusters:
+          - cluster:
+              server: ${{ secrets.KUBE_SERVER }}
+              certificate-authority-data: ${{ secrets.KUBE_CA }}
+            name: aks-cluster
+          contexts:
+          - context:
+              cluster: aks-cluster
+              user: aks-user
+              namespace: ${{ secrets.KUBE_NAMESPACE }}
+            name: aks-context
+          current-context: aks-context
+          users:
+          - name: aks-user
+            user:
+              client-certificate-data: ${{ secrets.KUBE_CERT }}
+              client-key-data: ${{ secrets.KUBE_KEY }}
+              token: ${{ secrets.KUBE_TOKEN }}
+          EOF
+
+          echo "KUBECONFIG=$PWD/iac/kubeconfig.yaml" >> $GITHUB_ENV
+
+      - name: Test kubectl connection
+        run: kubectl get nodes
+
+      - name: Install NGINX Ingress Controller
+        run: |
+          helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+          helm repo update
+          helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
+            --namespace ingress-nginx --create-namespace \
+            --set controller.replicaCount=2 \
+            --set controller.nodeSelector."kubernetes\.io/os"=linux \
+            --set defaultBackend.nodeSelector."kubernetes\.io/os"=linux \
+            --wait --timeout 5m
+
+      - name: Deploy Kubernetes manifests
+        run: kubectl apply -f k8s/
+
+
+      - name: Restart les conteneurs pour pull les dernières images docker
+        run: |
+          for deploy in backend frontend mysql; do
+            if kubectl get deployment $deploy -n todolist >/dev/null 2>&1; then
+              echo "Restarting deployment $deploy..."
+              kubectl rollout restart deployment/$deploy -n todolist
+            else
+              echo "Deployment $deploy does not exist yet, skipping restart."
+            fi
+          done
+
+      - name: Check rollout
+        run: |
+          kubectl rollout status deployment/mysql -n todolist
+          kubectl rollout status deployment/backend -n todolist
+          kubectl rollout status deployment/frontend -n todolist
+
+      - name: Get external IPs
+        run: |
+          echo "Fetching frontend Service external IP..."
+          FRONTEND_IP=""
+          while [ -z "$FRONTEND_IP" ]; do
+            FRONTEND_IP=$(kubectl get svc frontend -n todolist -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+            [ -z "$FRONTEND_IP" ] && echo "Waiting for frontend external IP..." && sleep 5
+          done
+          echo "Frontend external IP: $FRONTEND_IP"
+
+          echo "Fetching Ingress external IP..."
+          INGRESS_IP=""
+          while [ -z "$INGRESS_IP" ]; do
+            INGRESS_IP=$(kubectl get svc ingress-nginx-controller -n ingress-nginx -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+            [ -z "$INGRESS_IP" ] && echo "Waiting for ingress external IP..." && sleep 5
+          done
+          echo "Ingress external IP: $INGRESS_IP"
+
+          echo "FRONTEND_IP=$FRONTEND_IP" >> $GITHUB_ENV
+          echo "INGRESS_IP=$INGRESS_IP" >> $GITHUB_ENV
+
