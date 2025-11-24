@@ -1,13 +1,17 @@
 terraform {
+  required_version = ">= 1.7.0"
+
   required_providers {
     azurerm = {
-      source = "hashicorp/azurerm"
+      source  = "hashicorp/azurerm"
+      version = "~> 4.0"
     }
   }
 }
 
 provider "azurerm" {
-  features {
-  }
-  subscription_id = "ca5c57dd-3aab-4628-a78c-978830d03bbd" # colonne "SubscriptionId" avec "az account list -o table"
+  features {}
+
+  subscription_id = "342ad061-e612-452d-af5d-3cd458918b61"
 }
+
