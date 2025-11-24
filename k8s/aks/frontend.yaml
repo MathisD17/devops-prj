@@ -1,0 +1,37 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: devops-prj
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: frontend
+  template:
+    metadata:
+      labels:
+        app: frontend
+    spec:
+      imagePullSecrets:
+        - name: acr-cred
+      containers:
+        - name: frontend
+          image: acrdevopsprj.azurecr.io/devops-prj-frontend:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+  namespace: devops-prj
+spec:
+  selector:
+    app: frontend
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
+  type: LoadBalancer

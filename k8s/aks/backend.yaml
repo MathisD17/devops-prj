@@ -1,0 +1,50 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: devops-prj
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      imagePullSecrets:
+        - name: acr-cred
+      containers:
+        - name: backend
+          image: acrdevopsprj.azurecr.io/devops-prj-backend:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: PORT
+              value: "3000"
+            - name: DB_HOST
+              value: "mysql"
+            - name: DB_USER
+              value: "root"
+            - name: DB_PASSWORD
+              value: "root"
+            - name: DB_NAME
+              value: "todolist_db"
+            - name: DB_DIALECT
+              value: "mysql"
+          ports:
+            - containerPort: 3000
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend
+  namespace: devops-prj
+spec:
+  selector:
+    app: backend
+  ports:
+    - name: http
+      port: 3000
+      targetPort: 3000
+  type: ClusterIP
