@@ -1,0 +1,19 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: devops-prj-rules
+  namespace: monitoring
+  labels:
+    release: monitoring
+spec:
+  groups:
+  - name: devops-prj.rules
+    rules:
+    - alert: BackendDown
+      expr: kube_deployment_status_replicas_available{namespace="devops-prj", deployment="backend"} < 1
+      for: 30s
+      labels:
+        severity: warning
+      annotations:
+        summary: "Le backend du projet DevOps n'a aucun replica disponible"
+        description: "Le déploiement backend dans le namespace devops-prj n'a aucun pod disponible depuis plus de 30 secondes."
