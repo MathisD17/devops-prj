@@ -58,3 +58,7 @@ desktop.ini
 # Angular cache
 .angular/
 app/frontend/.angular/
+
+# Autre
+app/frontend/dist/
+aks-kubeconfig
