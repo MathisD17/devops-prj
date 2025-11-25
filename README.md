@@ -346,3 +346,24 @@ Ce projet démontre :
   - d’une **règle d’alerte personnalisée** sur le backend.
 
 Ces éléments s’inscrivent directement dans les exigences des CCP2 et CCP3 du titre professionnel ASD.
+
+---
+
+## 8. Limites et axes d’amélioration
+
+### HTTPS sur AKS via Ingress
+
+La mise en place d’un Ingress HTTPS avec certificat TLS a été préparée :
+
+- déploiement d’un **Ingress Controller NGINX** dans le namespace `ingress-nginx`,
+- génération d’un certificat TLS auto-signé et d’un secret Kubernetes `devops-prj-tls`,
+- création d’une ressource `Ingress` pointant vers le service `frontend`.
+
+Cependant, le déploiement final d’un service `LoadBalancer` dédié à l’Ingress n’a pas pu aboutir, en raison d’une **limitation de l’abonnement Azure** :
+
+> `PublicIPCountLimitReached: Cannot create more than 3 public IP addresses for this subscription in this region.`
+
+Dans un environnement de production (ou avec un quota IP publiques plus élevé),  
+une amélioration naturelle serait :
+- d’exposer l’application via un **Ingress HTTPS** unique (TLS),
+- et de supprimer les `LoadBalancer` redondants au profit de cet Ingress.
